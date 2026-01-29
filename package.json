@@ -1,0 +1,10 @@
+{
+  "name": "stock-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node stockhook.js",
+    "check": "node --check stockhook.js"
+  }
+}
