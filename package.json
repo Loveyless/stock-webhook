@@ -6,6 +6,11 @@
   "scripts": {
     "start": "node stockhook.js",
     "start:dev": "node scripts/start-dev.js",
-    "check": "node --check stockhook.js && node --check server.js && node --check config.js && node --check auth.js && node --check store.js && node --check http.js && node --check render/utils.js && node --check render/markdown.js && node --check render/pages.js && node --check scripts/start-dev.js"
+    "build": "node scripts/build.js",
+    "check": "node --check stockhook.js && node --check server.js && node --check config.js && node --check auth.js && node --check store.js && node --check http.js && node --check render/utils.js && node --check render/markdown.js && node --check render/pages.js && node --check scripts/start-dev.js && node --check scripts/build.js",
+    "check:dist": "npm run build && node --check dist/stockhook.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
   }
 }

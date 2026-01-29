@@ -40,6 +40,16 @@ npm run start
 npm run start:dev
 ```
 
+## 打包（单文件 JS）
+
+构建输出：`dist/stockhook.js`（包含 mock 页面，无需再拷贝 `render/*`、`mock.html`）。
+
+```bash
+npm i
+npm run build
+node dist/stockhook.js
+```
+
 接口：
 
 - `POST /webhook` 或 `POST /hook`：写入一条记录
