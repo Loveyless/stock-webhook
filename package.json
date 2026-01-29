@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node stockhook.js",
-    "check": "node --check stockhook.js"
+    "start:dev": "node scripts/start-dev.js",
+    "check": "node --check stockhook.js && node --check server.js && node --check config.js && node --check auth.js && node --check store.js && node --check http.js && node --check render/utils.js && node --check render/markdown.js && node --check render/pages.js && node --check scripts/start-dev.js"
   }
 }

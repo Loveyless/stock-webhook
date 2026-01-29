@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stockhook Mock Sender</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans";
+        margin: 20px;
+        color: #0f172a;
+      }
+      h1 {
+        margin: 0 0 12px 0;
+        font-size: 18px;
+      }
+      a {
+        color: #4f46e5;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #334155;
+        margin: 10px 0 6px;
+      }
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        outline: none;
+      }
+      textarea {
+        min-height: 220px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+      }
+      input:focus,
+      textarea:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 10px;
+      }
+      button {
+        border: 0;
+        background: #4f46e5;
+        color: white;
+        padding: 10px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .hint {
+        font-size: 12px;
+        color: #64748b;
+      }
+      .mono {
+        font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0b1020;
+        color: #e6edf3;
+        padding: 12px;
+        border-radius: 10px;
+        overflow-x: auto;
+        margin: 10px 0 0;
+        min-height: 52px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .right {
+        font-size: 12px;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <h1>Mock：发送 JSON 到 Stockhook</h1>
+      <div class="right"><a href="/">返回列表</a></div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="url">目标 URL（没写路径会自动补成 `/webhook`）</label>
+        <input id="url" placeholder="http://127.0.0.1:49554?token=xxxx" autocomplete="off" />
+        <div class="hint">推荐走 Header token，但这里按你需求支持 `?token=`。</div>
+      </div>
+
+      <div>
+        <label for="json">JSON 内容</label>
+        <textarea id="json" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="send">发送</button>
+      <span id="status" class="hint mono"></span>
+    </div>
+
+    <label for="out">响应</label>
+    <pre id="out" class="mono"></pre>
+
+    <script>
+      "use strict";
+
+      const $ = (id) => document.getElementById(id);
+
+      function setStatus(s) {
+        $("status").textContent = String(s || "");
+      }
+
+      function setOut(s) {
+        $("out").textContent = String(s || "");
+      }
+
+      function buildDefaultUrl() {
+        try {
+          const here = new URL(window.location.href);
+          const token = here.searchParams.get("token");
+          const target = new URL("/webhook", here.origin);
+          if (token) target.searchParams.set("token", token);
+          return target.toString();
+        } catch {
+          return "http://127.0.0.1:49554/webhook";
+        }
+      }
+
+      function normalizeTargetUrl(input) {
+        let s = String(input || "").trim();
+        if (!s) throw new Error("目标 URL 为空");
+        if (!/^https?:\/\//i.test(s)) s = "http://" + s;
+        const u = new URL(s);
+        const p = u.pathname || "/";
+        if (p !== "/" && p !== "/webhook" && p !== "/hook") {
+          throw new Error("只支持 POST /（默认）、/webhook 或 /hook");
+        }
+        return u.toString();
+      }
+
+      function validateJson(text) {
+        const s = String(text || "").trim();
+        if (!s) throw new Error("JSON 为空");
+        JSON.parse(s);
+        return s;
+      }
+
+      async function doSend() {
+        const btn = $("send");
+        btn.disabled = true;
+        setStatus("sending...");
+        setOut("");
+
+        let targetUrl;
+        let body;
+        try {
+          targetUrl = normalizeTargetUrl($("url").value);
+          body = validateJson($("json").value);
+        } catch (e) {
+          setStatus("error");
+          setOut(String(e && e.message ? e.message : e));
+          btn.disabled = false;
+          return;
+        }
+
+        try {
+          const res = await fetch(targetUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          });
+          const text = await res.text();
+          setStatus(`HTTP ${res.status}`);
+          setOut(text);
+        } catch (e) {
+          setStatus("network error");
+          setOut(String(e && e.message ? e.message : e));
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      $("url").value = buildDefaultUrl();
+      $("json").value = JSON.stringify(
+        {
+          title: "测试消息",
+          message: "hello",
+          sent_at: new Date().toISOString(),
+        },
+        null,
+        2
+      );
+
+      $("send").addEventListener("click", doSend);
+    </script>
+  </body>
+</html>
