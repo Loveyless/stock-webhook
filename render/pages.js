@@ -8,6 +8,85 @@ const { decodeUtf8Strict, readFileMax } = require('../store');
 const { extractTitleFromMarkdown, renderMarkdownWithAnchors } = require('./markdown');
 const { formatBytes, formatCnDate, firstNonEmptyLine, getByPath, htmlEscape } = require('./utils');
 
+function tryParseJsonObject(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  try {
+    const v = JSON.parse(s);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function extractJsonStringValuePossiblyTruncated(text, key) {
+  const s = String(text || '');
+  if (!s) return { value: '', index: -1 };
+
+  const needle = `"${key}"`;
+  let from = 0;
+  while (from < s.length) {
+    const keyPos = s.indexOf(needle, from);
+    if (keyPos < 0) return { value: '', index: -1 };
+    if (keyPos > 0 && s[keyPos - 1] === '\\') {
+      from = keyPos + needle.length;
+      continue;
+    }
+
+    let i = keyPos + needle.length;
+    while (i < s.length && /\s/.test(s[i])) i += 1;
+    if (s[i] !== ':') {
+      from = keyPos + needle.length;
+      continue;
+    }
+    i += 1;
+    while (i < s.length && /\s/.test(s[i])) i += 1;
+    if (s[i] !== '"') {
+      from = keyPos + needle.length;
+      continue;
+    }
+
+    i += 1;
+    let out = '';
+    while (i < s.length) {
+      const ch = s[i];
+      if (ch === '"') return { value: out, index: keyPos };
+      if (ch === '\\') {
+        i += 1;
+        if (i >= s.length) return { value: out, index: keyPos };
+        const esc = s[i];
+        if (esc === 'n') out += '\n';
+        else if (esc === 'r') out += '\r';
+        else if (esc === 't') out += '\t';
+        else if (esc === 'b') out += '\b';
+        else if (esc === 'f') out += '\f';
+        else if (esc === '"' || esc === '\\' || esc === '/') out += esc;
+        else if (esc === 'u') {
+          const hex = s.slice(i + 1, i + 5);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            out += String.fromCharCode(Number.parseInt(hex, 16));
+            i += 4;
+          } else {
+            return { value: out, index: keyPos };
+          }
+        } else {
+          out += esc;
+        }
+        i += 1;
+      } else {
+        out += ch;
+        i += 1;
+      }
+
+      if (out.length >= 20000) return { value: out, index: keyPos };
+    }
+
+    return { value: out, index: keyPos };
+  }
+  return { value: '', index: -1 };
+}
+
 function extractPayloadText(payload) {
   const candidates = [
     { path: ['content'], label: 'content' },
@@ -27,7 +106,25 @@ function extractPayloadText(payload) {
       if (typeof v === 'string' && v.trim()) return { text: v, label: c.label };
     }
   }
-  if (typeof payload === 'string' && payload.trim()) return { text: payload, label: 'raw' };
+  if (typeof payload === 'string' && payload.trim()) {
+    const s = payload.trim();
+    if (s.startsWith('{')) {
+      const parsed = tryParseJsonObject(s);
+      if (parsed) return extractPayloadText(parsed);
+
+      let best = { key: '', index: Infinity, value: '' };
+      for (const key of ['content', 'message', 'body', 'text']) {
+        const hit = extractJsonStringValuePossiblyTruncated(s, key);
+        const v = hit && hit.value ? hit.value : '';
+        if (!v || !v.trim()) continue;
+        if (typeof hit.index === 'number' && hit.index >= 0 && hit.index < best.index) {
+          best = { key, index: hit.index, value: v };
+        }
+      }
+      if (best.key) return { text: best.value, label: `json.${best.key}` };
+    }
+    return { text: payload, label: 'raw' };
+  }
   return { text: '', label: '' };
 }
 
@@ -62,7 +159,7 @@ function renderIndexPage(records) {
         .map(
           (r) =>
             `<tr>` +
-            `<td><a href="/view?id=${htmlEscape(r.name)}">${htmlEscape(r.title)}</a><div class="small mono">${htmlEscape(r.name)}</div></td>` +
+            `<td><a href="/view?id=${htmlEscape(r.name)}">${htmlEscape(r.title)}</a></td>` +
             `<td class="mono">${htmlEscape(r.when)}</td>` +
             `<td class="mono" style="text-align:right">${htmlEscape(r.size)}</td>` +
             `</tr>`,
@@ -193,15 +290,29 @@ async function renderViewPage(name, record, dir) {
     ? `<button type="button" class="toc-toggle" aria-controls="toc" aria-expanded="false">目录</button>`
     : '';
 
+  const recordIdHtml = `<div class="small mono">${htmlEscape(name)}</div>`;
+  let contentHtmlWithId = contentHtml;
+  const firstHeadingPos = contentHtmlWithId.search(/<h[1-6]\b/);
+  if (firstHeadingPos >= 0) {
+    const level = contentHtmlWithId[firstHeadingPos + 2];
+    const closeTag = `</h${level}>`;
+    const closePos = contentHtmlWithId.indexOf(closeTag, firstHeadingPos);
+    if (closePos >= 0) {
+      const insertAt = closePos + closeTag.length;
+      contentHtmlWithId = `${contentHtmlWithId.slice(0, insertAt)}\n${recordIdHtml}${contentHtmlWithId.slice(insertAt)}`;
+    } else {
+      contentHtmlWithId = `${recordIdHtml}\n${contentHtmlWithId}`;
+    }
+  } else {
+    contentHtmlWithId = `${recordIdHtml}\n${contentHtmlWithId}`;
+  }
+
   const mainHtml =
     `<div class="topbar"><div class="topbar-links"><a href="/">&larr; 返回</a> | <a href="/raw?id=${htmlEscape(name)}">下载原文</a></div>${tocToggleHtml}</div>` +
-    `<h1>${htmlEscape(title)}</h1>` +
     `<div class="small mono">${htmlEscape(chips.join('  |  '))}</div>` +
     `<div class="small">${htmlEscape(note)}</div>` +
     `<hr />` +
-    `<div>${contentHtml}</div>` +
-    `<hr />` +
-    `<div class="small mono">${htmlEscape(name)}</div>`;
+    `<div>${contentHtmlWithId}</div>`;
 
   const bodyHtml = hasToc
     ? `<div class="page">${tocHtml}<main class="main">${mainHtml}</main></div><div class="toc-backdrop" aria-hidden="true"></div>`
